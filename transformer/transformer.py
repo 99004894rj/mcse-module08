@@ -3,45 +3,39 @@ import torch.nn as nn
 import torch.optim as optim
 import math
 
-# Define the Multi-head Attention mechanism
+# Checking CUDA availability
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f'Using device: {device}')
+
+# Multi-head Attention mechanism
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads):
         super(MultiHeadAttention, self).__init__()
-        # Ensure the model dimension is divisible by the number of heads
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         self.d_model = d_model
         self.num_heads = num_heads
         self.d_k = d_model // num_heads
-        # Define the weight matrices for Query, Key, Value, and Output
         self.W_q = nn.Linear(d_model, d_model)
         self.W_k = nn.Linear(d_model, d_model)
         self.W_v = nn.Linear(d_model, d_model)
         self.W_o = nn.Linear(d_model, d_model)
 
-    # Define the scaled dot product attention function
     def scaled_dot_product_attention(self, Q, K, V, mask=None):
-        # Compute attention scores
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        # Apply mask if provided
         if mask is not None:
             attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
-        # Compute attention probabilities
         attn_probs = torch.softmax(attn_scores, dim=-1)
-        # Compute the output
         output = torch.matmul(attn_probs, V)
         return output
 
-    # Function to split the input into multiple heads
     def split_heads(self, x):
         batch_size, seq_length, d_model = x.size()
         return x.view(batch_size, seq_length, self.num_heads, self.d_k).transpose(1, 2)
 
-    # Function to combine the heads back to the original shape
     def combine_heads(self, x):
         batch_size, _, seq_length, d_k = x.size()
         return x.transpose(1, 2).contiguous().view(batch_size, seq_length, self.d_model)
 
-    # Forward pass of the Multi-head Attention mechanism
     def forward(self, Q, K, V, mask=None):
         Q = self.split_heads(self.W_q(Q))
         K = self.split_heads(self.W_k(K))
@@ -50,24 +44,21 @@ class MultiHeadAttention(nn.Module):
         output = self.W_o(self.combine_heads(attn_output))
         return output
 
-# Define the Position-wise Feed-Forward Network
+# Position-wise Feed-Forward Network
 class PositionWiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff):
         super(PositionWiseFeedForward, self).__init__()
-        # Define the two linear transformations with a ReLU activation in between
         self.fc1 = nn.Linear(d_model, d_ff)
         self.fc2 = nn.Linear(d_ff, d_model)
         self.relu = nn.ReLU()
 
-    # Forward pass of the Position-wise Feed-Forward Network
     def forward(self, x):
         return self.fc2(self.relu(self.fc1(x)))
 
-# Define the Positional Encoding module
+# Positional Encoding
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_seq_length):
         super(PositionalEncoding, self).__init__()
-        # Compute the positional encodings
         pe = torch.zeros(max_seq_length, d_model)
         position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model))
@@ -75,22 +66,19 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe.unsqueeze(0))
 
-    # Forward pass of the Positional Encoding module
     def forward(self, x):
         return x + self.pe[:, :x.size(1)]
 
-# Define the Encoder Layer module
+# Encoder Layer
 class EncoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
         super(EncoderLayer, self).__init__()
-        # Define the self-attention and feed-forward networks, and layer normalization
         self.self_attn = MultiHeadAttention(d_model, num_heads)
         self.feed_forward = PositionWiseFeedForward(d_model, d_ff)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    # Forward pass of the Encoder Layer
     def forward(self, x, mask):
         attn_output = self.self_attn(x, x, x, mask)
         x = self.norm1(x + self.dropout(attn_output))
@@ -98,11 +86,10 @@ class EncoderLayer(nn.Module):
         x = self.norm2(x + self.dropout(ff_output))
         return x
 
-# Define the Decoder Layer module
+# Decoder Layer
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
         super(DecoderLayer, self).__init__()
-        # Define the self-attention, cross-attention, and feed-forward networks, and layer normalization
         self.self_attn = MultiHeadAttention(d_model, num_heads)
         self.cross_attn = MultiHeadAttention(d_model, num_heads)
         self.feed_forward = PositionWiseFeedForward(d_model, d_ff)
@@ -111,7 +98,6 @@ class DecoderLayer(nn.Module):
         self.norm3 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    # Forward pass of the Decoder Layer
     def forward(self, x, enc_output, src_mask, tgt_mask):
         attn_output = self.self_attn(x, x, x, tgt_mask)
         x = self.norm1(x + self.dropout(attn_output))
@@ -121,11 +107,10 @@ class DecoderLayer(nn.Module):
         x = self.norm3(x + self.dropout(ff_output))
         return x
 
-# Define the complete Transformer model
+# Transformer Model
 class Transformer(nn.Module):
     def __init__(self, src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout=0.1):
         super(Transformer, self).__init__()
-        # Define the source and target embeddings, positional encoding, encoder and decoder layers, and final linear transformation
         self.encoder_embedding = nn.Embedding(src_vocab_size, d_model)
         self.decoder_embedding = nn.Embedding(tgt_vocab_size, d_model)
         self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
@@ -134,16 +119,16 @@ class Transformer(nn.Module):
         self.fc = nn.Linear(d_model, tgt_vocab_size)
         self.dropout = nn.Dropout(dropout)
 
-    # Function to generate the source and target masks
+    
     def generate_mask(self, src, tgt):
-        src_mask = (src != 0).unsqueeze(1).unsqueeze(2)
-        tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3)
+        src_mask = (src != 0).unsqueeze(1).unsqueeze(2).to(device)  # Ensure src_mask is on the same device
+        tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3).to(device)  # Ensure tgt_mask is on the same device
         seq_length = tgt.size(1)
-        nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool()
+        nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool().to(device)  # Move nopeak_mask to GPU
         tgt_mask = tgt_mask & nopeak_mask
         return src_mask, tgt_mask
 
-    # Forward pass of the Transformer
+
     def forward(self, src, tgt):
         src_mask, tgt_mask = self.generate_mask(src, tgt)
         src_embedded = self.dropout(self.positional_encoding(self.encoder_embedding(src)))
@@ -157,43 +142,50 @@ class Transformer(nn.Module):
         output = self.fc(dec_output)
         return output
 
-# Define the hyperparameters
+# Initialize and set the Transformer model to the appropriate device
+transformer = Transformer(
+    src_vocab_size=5000, tgt_vocab_size=5000, d_model=512, num_heads=8,
+    num_layers=6, d_ff=2048, max_seq_length=100, dropout=0.1
+).to(device)
+print("Model initialized and set to device.")
+
+# Define hyperparameters
+batch_size = 64
 src_vocab_size = 5000
 tgt_vocab_size = 5000
-d_model = 512
-num_heads = 8
-num_layers = 6
-d_ff = 2048
 max_seq_length = 100
-dropout = 0.1
 
-# Initialize the Transformer
-transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
-
-# Generate random sample data
-src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+# Generate random sample data and move it to the appropriate device
+src_data = torch.randint(1, src_vocab_size, (batch_size, max_seq_length)).to(device)
+tgt_data = torch.randint(1, tgt_vocab_size, (batch_size, max_seq_length)).to(device)
+print("Sample data generated and moved to device.")
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss(ignore_index=0)
 optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+print("Loss function and optimizer defined.")
 
-# Train the model
+# Training loop
 transformer.train()
+print("Starting training...")
 for epoch in range(100):
     optimizer.zero_grad()
     output = transformer(src_data, tgt_data[:, :-1])
     loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
     loss.backward()
     optimizer.step()
-    print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
+    print(f"Epoch {epoch+1}: Loss = {loss.item()}")
 
-# Evaluate the model
+# Set the model to evaluation mode
 transformer.eval()
+print("Model set to evaluation mode.")
 
-# Generate random validation data
-val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+# Generate random validation data and move it to the device
+val_src_data = torch.randint(1, src_vocab_size, (batch_size, max_seq_length)).to(device)
+val_tgt_data = torch.randint(1, tgt_vocab_size, (batch_size, max_seq_length)).to(device)
+print("Validation data generated and moved to device.")
+
+# Evaluation loop
 with torch.no_grad():
     val_output = transformer(val_src_data, val_tgt_data[:, :-1])
     val_loss = criterion(val_output.contiguous().view(-1, tgt_vocab_size), val_tgt_data[:, 1:].contiguous().view(-1))
